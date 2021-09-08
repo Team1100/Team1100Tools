@@ -35,18 +35,23 @@ table = NetworkTables.getTable('Shuffleboard/Drive')
 # This retrieves a boolean at /SmartDashboard/foo
 table.putBoolean('DataCollection', True)
 dataCollection = True
-commandCurrentState = table.getBoolean('DriveDistance/DriveDistance/running', False)
+commandCurrentState = table.getBoolean('DriveDistanceSim/DriveDistanceSim/running', False)
 commandPreviousState = False
 commandJustStopped = False
 
-while table.getBoolean('DataCollection'):
+table.putBoolean('DriveDistanceSim/DriveDistanceSim/running', True)
+
+counter = 10
+
+while table.getBoolean('DataCollection', False):
     #dataCollection = table.getBoolean('DataCollection', False)
     if not dataCollection:
         break
     
     commandPreviousState = commandCurrentState
-    commandCurrentState = table.getBoolean('DriveDistance/DriveDistance/running', False)
-    commandJustStopped = commandPreviousState and not commandCurrentState 
+    commandCurrentState = table.getBoolean('DriveDistanceSim/DriveDistanceSim/running', False)
+    commandJustStopped = commandPreviousState and not commandCurrentState
+
 
     if commandJustStopped:
         time.sleep(3)
@@ -56,10 +61,14 @@ while table.getBoolean('DataCollection'):
             sign = -1
         expectedDistance = table.getNumber('DriveDistance/drivingDistance', 0) * sign
         actualDistance = table.getNumber('Data/actualDistance', 0)
-        stoppingDistance = actualDistance - expectedDistance
+        stoppingDistance = abs(actualDistance - expectedDistance)
         print("drivingSpeed = {}, expectedDistance = {}, actualDistance {}, stoppingDistance = {}".format(drivingSpeed, expectedDistance, actualDistance, stoppingDistance))
 
         with open(args.output_file, 'a') as fh:
             fh.write("{}, {}, {}, {} \n".format(drivingSpeed, expectedDistance, actualDistance, stoppingDistance))
 
+        if counter > 0:
+            counter -= 1
+            table.putNumber('DriveDistance/drivingSpeed', (drivingSpeed + 1))
+            table.putBoolean('DriveDistanceSim/DriveDistanceSim/running', True)
 
