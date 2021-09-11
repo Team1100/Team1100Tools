@@ -28,12 +28,12 @@ with cond:
 
 # Insert your processing code here
 print("Connected!")
-table = NetworkTables.getTable('Shuffleboard/Drive')
+table = NetworkTables.getTable('Robot')
 
 # This retrieves a boolean at /SmartDashboard/foo
 
-table.putBoolean('DataCollection', False)
-
+enabled = table.getBoolean('enabled', False)
+print("enabled: {}".format(enabled))
 time.sleep(1)
 
 

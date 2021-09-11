@@ -20,7 +20,7 @@ def connectionListener(connected, info):
         notified[0] = True
         cond.notify()
 
-NetworkTables.initialize(server='127.0.0.1')
+NetworkTables.initialize(server='10.11.21.2') #127.0.0.1
 NetworkTables.addConnectionListener(connectionListener, immediateNotify=True)
 
 with cond:
@@ -31,17 +31,27 @@ with cond:
 # Insert your processing code here
 print("Connected!")
 table = NetworkTables.getTable('Shuffleboard/Drive')
+robotTable = NetworkTables.getTable('Robot')
+robotEnabled = robotTable.getBoolean('enabled', False)
+
+print("Waiting for robot to be enabled")
+    
+while not robotEnabled:
+    time.sleep(1)
+    robotEnabled = robotTable.getBoolean('enabled', False)
+
+print("Robot is enabled")
 
 # This retrieves a boolean at /SmartDashboard/foo
 table.putBoolean('DataCollection', True)
 dataCollection = True
-commandCurrentState = table.getBoolean('DriveDistanceSim/DriveDistanceSim/running', False)
+commandCurrentState = table.getBoolean('DriveDistance/DriveDistance/running', False)
 commandPreviousState = False
 commandJustStopped = False
 
-table.putBoolean('DriveDistanceSim/DriveDistanceSim/running', True)
+table.putBoolean('DriveDistance/DriveDistance/running', True)
 
-counter = 10
+counter = 4
 
 while table.getBoolean('DataCollection', False):
     #dataCollection = table.getBoolean('DataCollection', False)
@@ -49,7 +59,7 @@ while table.getBoolean('DataCollection', False):
         break
     
     commandPreviousState = commandCurrentState
-    commandCurrentState = table.getBoolean('DriveDistanceSim/DriveDistanceSim/running', False)
+    commandCurrentState = table.getBoolean('DriveDistance/DriveDistance/running', False)
     commandJustStopped = commandPreviousState and not commandCurrentState
 
 
@@ -69,6 +79,11 @@ while table.getBoolean('DataCollection', False):
 
         if counter > 0:
             counter -= 1
-            table.putNumber('DriveDistance/drivingSpeed', (drivingSpeed + 1))
-            table.putBoolean('DriveDistanceSim/DriveDistanceSim/running', True)
+            table.putNumber('DriveDistance/drivingSpeed', (drivingSpeed + 0.1))
+            table.putBoolean('DriveDistance/DriveDistance/running', True)
+
+        elif counter == 0:
+            print("Done collecting data")
+            break
+            
 
