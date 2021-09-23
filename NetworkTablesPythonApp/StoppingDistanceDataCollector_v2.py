@@ -51,10 +51,16 @@ commandJustStopped = False
 
 table.putBoolean('DriveDistance/DriveDistance/running', True)
 
-counter = 4
+distanceValue = 36
+speedValues = [0.1, -0.1, 0.2, -0.2, 0.3, -0.3, 0.4, -0.4, 0.5, -0.5, 0.6, -0.6, 0.7, -0.7, 0.8, -0.8, 0.9, -0.9, 1.0, -1.0]
+counter = len(speedValues) # start at index 1
+
+
+table.putNumber('DriveDistance/drivingDistance', distanceValue)
+table.putNumber('DriveDistance/drivingSpeed', speedValues[0])
 
 while table.getBoolean('DataCollection', False):
-    #dataCollection = table.getBoolean('DataCollection', False)
+    dataCollection = table.getBoolean('DataCollection', False)
     if not dataCollection:
         break
     
@@ -78,9 +84,11 @@ while table.getBoolean('DataCollection', False):
             fh.write("{}, {}, {}, {} \n".format(drivingSpeed, expectedDistance, actualDistance, stoppingDistance))
 
         if counter > 0:
-            counter -= 1
-            table.putNumber('DriveDistance/drivingSpeed', (drivingSpeed + 0.1))
+            counter -= 1                
+            table.putNumber('DriveDistance/drivingSpeed', speedValues[len(speedValues) - counter])
+            #print('drivingSpeed = {}'.format(speedValues[len(speedValues) - counter]))
             table.putBoolean('DriveDistance/DriveDistance/running', True)
+            
 
         elif counter == 0:
             print("Done collecting data")
