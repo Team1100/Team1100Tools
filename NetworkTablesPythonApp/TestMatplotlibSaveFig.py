@@ -24,6 +24,9 @@ def exampleSetup(save_location):
     line1, = ax.plot(x,y,label='data set 1')
 
     ax.legend()
+    ax.set_xlabel("Speed in %/100")
+    ax.set_ylabel("Stopping Distance in inches")
+    ax.set_title("Inputted Distance as x")
     fig.savefig(save_location)
 
 save_loc = "fig.png"
