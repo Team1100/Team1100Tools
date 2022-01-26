@@ -1,0 +1,35 @@
+{
+  "tables": {
+    "Shuffleboard/Drive": [
+      {
+        "name": "DataCollection"
+      },
+      {
+        "name": "DriveCompensatedDistance/DriveCompensatedDistance/running"
+      },
+      {
+        "name": "Accelerometer/instantAccel"
+      },
+      {
+        "name": "Accelerometer/currentTime"
+      }
+    ],
+    "Shuffleboard/Drive": [
+      {
+        "name": "enabled"
+      }
+    ]
+  },
+  "graphs": [
+      {
+        "title": "Acceleration vs Time",
+        "ylabel": "Time in seconds",
+        "xlabel": "Acceleration in inches per second",
+        "dataX": "instantAccel",
+        "dataY": "instantAccel"
+      },
+      {
+        "title": "Velocity vs Time"
+      }
+  ]
+}
