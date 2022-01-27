@@ -1,8 +1,10 @@
+import csv
+import json
+import time
 import threading
 from networktables import NetworkTables
 import argparse
 from datetime import datetime
-import time
 import matplotlib.pyplot as plt
 
 date_str = datetime.now().strftime('%Y%m%d%H%M%S')

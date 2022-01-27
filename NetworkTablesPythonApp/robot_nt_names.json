@@ -1,11 +1,13 @@
 {
+  "triggerCommand":{
+      {
+        "name": "DriveCompensatedDistance/DriveCompensatedDistance/running"
+      }
+  },
   "tables": {
     "Shuffleboard/Drive": [
       {
         "name": "DataCollection"
-      },
-      {
-        "name": "DriveCompensatedDistance/DriveCompensatedDistance/running"
       },
       {
         "name": "Accelerometer/instantAccel"
@@ -14,7 +16,7 @@
         "name": "Accelerometer/currentTime"
       }
     ],
-    "Shuffleboard/Drive": [
+    "Robot": [
       {
         "name": "enabled"
       }
