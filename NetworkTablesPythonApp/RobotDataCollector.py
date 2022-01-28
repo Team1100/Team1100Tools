@@ -12,117 +12,159 @@ date_str = datetime.now().strftime('%Y%m%d%H%M%S')
 parser = argparse.ArgumentParser(description = 'Script to log data from robot. ')
 parser.add_argument('-o', '--output-file', action='store', default=date_str + '_robot_data.csv', help='Name of file to use for writing collected data')
 parser.add_argument('-i', '--input-file', action='store', default='robot_nt_names.json', help='List of names to query from NetworkTables and store in the output file')
-parser.add_argument('-c', '--data-count', action='store', help='Defines the number of data entries to collect before exiting')
-parser.add_argument('-a', '--robot-team', action='store', default=1100, type=int, help='Robot team number')
+parser.add_argument('-c', '--sample-count', action='store', default=1, help='Defines the number of samples collect before exiting')
+parser.add_argument('-t', '--robot-team', action='store', default=1100, type=int, help='Robot team number')
 parser.add_argument('-a', '--robot-ip', action='store', default=None, help='IP Address of the robot to connect to, e.x: 10.11.21.2 or 127.0.0.1')
 parser.add_argument('-l', '--use-labels', action='store_true', help='Insert heading labels in the CSV output file')
+parser.add_argument('-v', '--verbose', action='store_true', help='Print more information about what happens')
 args = parser.parse_args()
 print(args)
 
-cond = threading.Condition()
-notified = [False]
+class RobotDataCollector(object):
+    # TOP LEVEL INPUT FILE KEYWORDS
+    TRIGGER_CMD = "triggerCommand"
+    TABLES = "tables"
+    GRAPHS = "graphs"
+    # TABLE propery keywords
+    TABLE_ELEMENT_NAME = "name"
+    TABLE_ELEMENT_TYPE = "type"
+    TABLE_ELEMENT_TYPE_BOOLEAN = "boolean"
+    TABLE_ELEMENT_TYPE_DOUBLE = "double"
+    # GRAPH propery keywords
+    GRAPH_TITLE = "title"
+    GRAPH_YLABEL = "ylabel"
+    GRAPH_XLABEL = "xlabel"
+    GRAPH_DATAX = "dataX"
+    GRAPH_DATAY = "dataY"
+    def __init__(self, parsed_args):
+        self.args = parsed_args
+        self.connectToNetworkTables()
+        self.config = self.loadInputFile()
+        if (self.args.verbose):
+            print("Input:")
+            print(self.config)
+            print("")
 
-def connectionListener(connected, info):
-    print(info, '; Connected=%s' % connected)
-    with cond:
-        notified[0] = True
-        cond.notify()
+    def loadInputFile(self):
+        json_content = ""
+        with open(self.args.input_file) as fp:
+            json_content = json.load(fp)
+        return json_content
 
-# Decide whether to start using team number or IP address
-if args.robot_ip is None:
-    NetworkTables.startClientTeam(args.robot_team)
-else
-    NetworkTables.initialize(server='10.11.21.2')
+    def connectToNetworkTables(self):
+        cond = threading.Condition()
+        notified = [False]
 
-NetworkTables.addConnectionListener(connectionListener, immediateNotify=True)
+        def connectionListener(connected, info):
+            print(info, '; Connected=%s' % connected)
+            with cond:
+                notified[0] = True
+                cond.notify()
 
-with cond:
-    print("Waiting")
-    if not notified[0]:
-        cond.wait()
+        # Decide whether to start using team number or IP address
+        if self.args.robot_ip is None:
+            NetworkTables.startClientTeam(self.args.robot_team)
+        else:
+            NetworkTables.initialize(server=self.args.robot_ip)
 
-# Insert your processing code here
-print("Connected!")
-table = NetworkTables.getTable('Shuffleboard/Drive')
-robotTable = NetworkTables.getTable('Robot')
-robotEnabled = robotTable.getBoolean('enabled', False)
+        NetworkTables.addConnectionListener(connectionListener, immediateNotify=True)
 
-print("Waiting for robot to be enabled")
-    
-while not robotEnabled:
-    time.sleep(1)
-    robotEnabled = robotTable.getBoolean('enabled', False)
+        with cond:
+            print("Waiting")
+            if not notified[0]:
+                cond.wait()
 
-print("Robot is enabled")
+        # Insert your processing code here
+        print("Connected!")
 
-# This retrieves a boolean at /SmartDashboard/foo
-table.putBoolean('DataCollection', True)
-dataCollection = True
-commandCurrentState = table.getBoolean('DriveCompensatedDistance/DriveCompensatedDistance/running', False)
-commandPreviousState = False
-commandJustStopped = False
+    def waitForRobotEnabled(self):
+        table = NetworkTables.getTable('Shuffleboard/Drive')
+        robotTable = NetworkTables.getTable('Robot')
+        robotEnabled = robotTable.getBoolean('enabled', False)
 
-table.putBoolean('DriveCompensatedDistance/DriveCompensatedDistance/running', True)
+        print("Waiting for robot to be enabled")
+                
+        while not robotEnabled:
+            time.sleep(1)
+            robotEnabled = robotTable.getBoolean('enabled', False)
 
-distanceValue = 36
-speedValues = [0.1, -0.1, 0.2, -0.2, 0.3, -0.3, 0.4, -0.4, 0.5, -0.5, 0.6, -0.6, 0.7, -0.7, 0.8, -0.8, 0.9, -0.9, 1.0, -1.0]
-counter = len(speedValues) - 1 # start at index 1
-stoppingDistanceValues = []
+        print("Robot is enabled")
 
+    def collectFieldNames(self):
+        if not self.TABLES in self.config:
+            print("No tables provided to collect data from.")
+            exit(0)
+        tables = self.config[self.TABLES]
+        field_names = []
 
-table.putNumber('DriveDistance/drivingDistance', distanceValue)
-table.putNumber('DriveDistance/drivingSpeed', speedValues[0])
+        for table_name in tables:
+            nt_table = NetworkTables.getTable(table_name)
+            # Collect each item from the table
+            for entry in tables[table_name]:
+                # Extract field name and add to list
+                if not self.TABLE_ELEMENT_NAME in entry:
+                    continue
+                field_name = entry[self.TABLE_ELEMENT_NAME]
+                field_names.append(field_name)
+        return field_names
 
-while table.getBoolean('DataCollection', False):
-    dataCollection = table.getBoolean('DataCollection', False)
-    if not dataCollection:
-        break
-    
-    commandPreviousState = commandCurrentState
-    commandCurrentState = table.getBoolean('DriveCompensatedDistance/DriveCompensatedDistance/running', False)
-    commandJustStopped = commandPreviousState and not commandCurrentState
+    def collectData(self):
+        # Check that there are tables to collect data from
+        if not self.TABLES in self.config:
+            print("No tables provided to collect data from.")
+            exit(0)
+        tables = self.config[self.TABLES]
+        samples = {}
 
+        # Collect field names from input file
+        field_names = self.collectFieldNames()
+        # Open output file
+        out_file = open(self.args.output_file, 'w')
+        csv_writer = csv.DictWriter(out_file, fieldnames=field_names)
+        csv_writer.writeheader()
 
-    if commandJustStopped:
-        time.sleep(3)
-        drivingSpeed = table.getNumber('DriveDistance/drivingSpeed', 0)
-        sign = 1
-        if drivingSpeed < 0:
-            sign = -1
-        expectedDistance = table.getNumber('DriveDistance/drivingDistance', 0) * sign
-        actualDistance = table.getNumber('Data/actualDistance', 0)
-        stoppingDistance = abs(actualDistance - expectedDistance)
-        stoppingDistanceValues.append(stoppingDistance)
-        print("drivingSpeed = {}, expectedDistance = {}, actualDistance {}, stoppingDistance = {}".format(drivingSpeed, expectedDistance, actualDistance, stoppingDistance))
+        # While there are still samples to collect
+        number_of_samples = 0
+        while (number_of_samples < self.args.sample_count):
+            csv_line = {}
+            # For each table from the input file
+            for table_name in tables:
+                print("Collecting data from table " + table_name)
+                nt_table = NetworkTables.getTable(table_name)
+                # Collect each item from the table
+                for entry in tables[table_name]:
+                    # Extract sample name
+                    if not self.TABLE_ELEMENT_NAME in entry:
+                        continue
+                    sample_name = entry[self.TABLE_ELEMENT_NAME]
+                    # Extract sample type (default is double if not provided)
+                    sample_type = self.TABLE_ELEMENT_TYPE_DOUBLE
+                    if (self.TABLE_ELEMENT_TYPE in entry):
+                        sample_type = entry[self.TABLE_ELEMENT_TYPE]
+                    # Collect the sample
+                    sample_value = None
+                    if sample_name not in samples:
+                        samples[sample_name] = []
+                    if (sample_type == self.TABLE_ELEMENT_TYPE_DOUBLE):
+                        sample_value = nt_table.getNumber(sample_name, 0)
+                    elif (sample_type == self.TABLE_ELEMENT_TYPE_BOOLEAN):
+                        sample_value = nt_table.getBoolean(sample_name, False)
+                    else:
+                        print("Unknown sample type {} for sample {}. Using None.".format(sample_type, sample_name))
+                        sample_value = None
+                    samples[sample_name].append(sample_value)
+                    csv_line[sample_name] = sample_value
+                    print("Collected sample {}={} from table {}".format(sample_name, sample_value, table_name))
+            # Log an entry for the collected information in the csv file
+            csv_writer.writerow(csv_line)
 
-        with open(args.output_file, 'a') as fh:
-            fh.write("{}, {}, {}, {} \n".format(drivingSpeed, expectedDistance, actualDistance, stoppingDistance))
+            #Increment sample count
+            number_of_samples += 1
+        # If there are graphs requested from the input file
+        #   For each graph
+        #       Generate a graph with matplotlib
+        #       Save an image of the graph
+        pass
 
-        if counter > 0:           
-            table.putNumber('DriveDistance/drivingSpeed', speedValues[len(speedValues) - counter])
-            #print('drivingSpeed = {}'.format(speedValues[len(speedValues) - counter]))
-            counter -= 1     
-            table.putBoolean('DriveCompensatedDistance/DriveCompensatedDistance/running', True)
-            
-
-        elif counter == 0:
-            print("Done collecting data")
-            l = list(zip(speedValues,stoppingDistanceValues))
-            l.sort()
-            x = [t[0] for t in l]
-            y = [t[1] for t in l]
-
-            fig, ax = plt.subplots()
-
-            line1, = ax.plot(x,y,label='robot stopping distance')
-            imgFileName = args.output_file[0:-3] + "png"
-
-            ax.legend()
-            ax.set_xlabel("Speed in %/100")
-            ax.set_ylabel("Stopping Distance in inches")
-            ax.set_title("Compensated Stopping Distance vs. Speed for a Distance of {} Inches".format(distanceValue))
-            fig.savefig(imgFileName)
-
-            break
-            
-
+data_collector = RobotDataCollector(args)
+data_collector.collectData()
