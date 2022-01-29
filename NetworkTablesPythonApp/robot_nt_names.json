@@ -1,0 +1,39 @@
+{
+  "triggerCommand":{
+    "name": "DriveCompensatedDistance/DriveCompensatedDistance/running"
+  },
+  "tables": {
+    "Shuffleboard/Drive": [
+      {
+        "name": "DataCollection",
+        "type": "boolean"
+      },
+      {
+        "name": "Accelerometer/instantAccel",
+        "type": "double"
+      },
+      {
+        "name": "Accelerometer/currentTime",
+        "type": "double"
+      }
+    ],
+    "Robot": [
+      {
+        "name": "enabled",
+        "type": "boolean"
+      }
+    ]
+  },
+  "graphs": [
+      {
+        "title": "Acceleration vs Time",
+        "ylabel": "Time in seconds",
+        "xlabel": "Acceleration in inches per second",
+        "dataX": "currentTime",
+        "dataY": "instantAccel"
+      },
+      {
+        "title": "Velocity vs Time"
+      }
+  ]
+}
