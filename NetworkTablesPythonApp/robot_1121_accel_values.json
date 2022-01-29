@@ -1,0 +1,30 @@
+{
+  "triggerCommand":{
+    "name": "DriveCompensatedDistance/DriveCompensatedDistance/running"
+  },
+  "tables": {
+    "Shuffleboard/Drive": [
+      {
+        "name": "Accelerometer/xInstantAccel",
+        "type": "double"
+      },
+      {
+        "name": "Accelerometer/yInstantAccel",
+        "type": "double"
+      },
+      {
+        "name": "Accelerometer/currentTime",
+        "type": "double"
+      }
+    ]
+  },
+  "graphs": [
+      {
+        "title": "X and Y Acceleration vs Time",
+        "ylabel": "Time in seconds",
+        "xlabel": "X Acceleration in units of gravity",
+        "dataX": "currentTime",
+        "dataY": ["xInstantAccel", "yInstantAccel"]
+      }
+  ]
+}
