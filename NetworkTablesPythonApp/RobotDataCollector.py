@@ -1,3 +1,4 @@
+import os
 import csv
 import json
 import time
@@ -10,12 +11,13 @@ import matplotlib.pyplot as plt
 date_str = datetime.now().strftime('%Y%m%d%H%M%S')
 
 parser = argparse.ArgumentParser(description = 'Script to log data from robot. ')
+parser.add_argument('-d', '--output-directory', action='store', default='./', help='Name of directory to store the output file')
 parser.add_argument('-o', '--output-file', action='store', default=date_str + '_robot_data.csv', help='Name of file to use for writing collected data')
 parser.add_argument('-i', '--input-file', action='store', default='robot_nt_names.json', help='List of names to query from NetworkTables and store in the output file')
 parser.add_argument('-c', '--sample-count', action='store', type=int, default=1, help='Defines the number of samples collect before exiting')
 parser.add_argument('-t', '--robot-team', action='store', default=1100, type=int, help='Robot team number')
 parser.add_argument('-a', '--robot-ip', action='store', default=None, help='IP Address of the robot to connect to, e.x: 10.11.21.2 or 127.0.0.1')
-parser.add_argument('-l', '--use-labels', action='store_true', help='Insert heading labels in the CSV output file')
+parser.add_argument('-l', '--no-labels', action='store_true', help='Do not insert heading labels in the CSV output file')
 parser.add_argument('-v', '--verbose', action='store_true', help='Print more information about what happens')
 args = parser.parse_args()
 print(args)
@@ -105,7 +107,8 @@ class RobotDataCollector(object):
                 if not self.TABLE_ELEMENT_NAME in entry:
                     continue
                 field_name = entry[self.TABLE_ELEMENT_NAME]
-                field_names.append(field_name)
+                field_short_name = field_name.split('/')[-1]
+                field_names.append(field_short_name)
         return field_names
 
     def collectData(self):
@@ -119,9 +122,11 @@ class RobotDataCollector(object):
         # Collect field names from input file
         field_names = self.collectFieldNames()
         # Open output file
-        out_file = open(self.args.output_file, 'w')
-        csv_writer = csv.DictWriter(out_file, fieldnames=field_names)
-        csv_writer.writeheader()
+        output_filepath = os.path.join(self.args.output_directory, self.args.output_file)
+        out_file = open(output_filepath, 'w')
+        csv_writer = csv.DictWriter(out_file, fieldnames=field_names, dialect='unix')
+        if not self.args.no_labels: # Write labels by default
+            csv_writer.writeheader()
 
         # While there are still samples to collect
         number_of_samples = 0
@@ -143,8 +148,9 @@ class RobotDataCollector(object):
                         sample_type = entry[self.TABLE_ELEMENT_TYPE]
                     # Collect the sample
                     sample_value = None
-                    if sample_name not in samples:
-                        samples[sample_name] = []
+                    sample_short_name = sample_name.split('/')[-1]
+                    if sample_short_name not in samples:
+                        samples[sample_short_name] = []
                     if (sample_type == self.TABLE_ELEMENT_TYPE_DOUBLE):
                         sample_value = nt_table.getNumber(sample_name, 0)
                     elif (sample_type == self.TABLE_ELEMENT_TYPE_BOOLEAN):
@@ -152,8 +158,8 @@ class RobotDataCollector(object):
                     else:
                         print("Unknown sample type {} for sample {}. Using None.".format(sample_type, sample_name))
                         sample_value = None
-                    samples[sample_name].append(sample_value)
-                    csv_line[sample_name] = sample_value
+                    samples[sample_short_name].append(sample_value)
+                    csv_line[sample_short_name] = sample_value
                     print("Collected sample {}={} from table {}".format(sample_name, sample_value, table_name))
             # Log an entry for the collected information in the csv file
             csv_writer.writerow(csv_line)
