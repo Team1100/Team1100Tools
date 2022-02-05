@@ -1,6 +1,13 @@
 {
-  "triggerCommand":{
-    "name": "DriveCompensatedDistance/DriveCompensatedDistance/running"
+  "controls":{
+      "robotEnabled":{
+          "table": "Robot",
+          "entry": "enabled"
+      },
+      "triggerCommand":{
+          "table": "Shuffleboard/Drive",
+          "entry": "DriveCompensatedDistance/DriveCompensatedDistance/running"
+      }
   },
   "tables": {
     "Shuffleboard/Drive": [
@@ -21,8 +28,8 @@
   "graphs": [
       {
         "title": "X and Y Acceleration vs Time",
-        "ylabel": "Time in seconds",
-        "xlabel": "X Acceleration in units of gravity",
+        "xlabel": "Time in seconds",
+        "ylabel": "X Acceleration in units of gravity",
         "dataX": "currentTime",
         "dataY": ["xInstantAccel", "yInstantAccel"]
       }

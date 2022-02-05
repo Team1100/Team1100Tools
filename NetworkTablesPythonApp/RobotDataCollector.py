@@ -38,14 +38,19 @@ class RobotDataCollector(object):
     GRAPH_XLABEL = "xlabel"
     GRAPH_DATAX = "dataX"
     GRAPH_DATAY = "dataY"
+    GRAPH_REQUIRED_LABELS = [GRAPH_TITLE, GRAPH_YLABEL, GRAPH_XLABEL,
+                             GRAPH_DATAX, GRAPH_DATAY]
     def __init__(self, parsed_args):
         self.args = parsed_args
         self.connectToNetworkTables()
         self.config = self.loadInputFile()
+        self.samples = {}
+        self.field_names = []
         if (self.args.verbose):
             print("Input:")
             print(self.config)
             print("")
+        self.verifyConfigControls()
 
     def loadInputFile(self):
         json_content = ""
@@ -79,16 +84,42 @@ class RobotDataCollector(object):
         # Insert your processing code here
         print("Connected!")
 
+    def verifyConfigControls(self):
+        if not "controls" in self.config:
+            raise Exception("Controls section missing from input file.")
+        controls = self.config["controls"]
+        if not "robotEnabled" in controls:
+            raise Exception("No network table entry identified for determining robot enable/disable state.")
+        self.robotEnabledCtrl = controls["robotEnabled"]
+        if not type(self.robotEnabledCtrl) is dict:
+            raise Exception("The robotEnabled entry MUST be a dictionary type in the json input file!")
+        if not self.robotEnabledCtrl:
+            raise Exception("Multiple robotEnabled entries provided in json input file. Only one is supported!")
+        if not "triggerCommand" in controls:
+            raise Exception("No trigger command supplied.")
+        self.triggerCommandCtrl = controls["triggerCommand"]
+        if not type(self.triggerCommandCtrl) is dict:
+            raise Exception("The triggerCommand entry MUST be a dictionary type in the json input file!")
+        # Verify that all control objects have a table name
+        # and network tables table entry
+        required_control_labels = ["table", "entry"]
+        for control_name in self.config["controls"]:
+            control_obj = self.config["controls"][control_name]
+            for label in required_control_labels:
+                if label not in control_obj:
+                    raise Exception("The {} entry must have a dictionary entry for {} but none was found!".format(control_name, label))
+
+
+
     def waitForRobotEnabled(self):
-        table = NetworkTables.getTable('Shuffleboard/Drive')
-        robotTable = NetworkTables.getTable('Robot')
-        robotEnabled = robotTable.getBoolean('enabled', False)
+        ctrlTable = NetworkTables.getTable(self.robotEnabledCtrl["table"])
+        robotEnabled = ctrlTable.getBoolean(self.robotEnabledCtrl["entry"], False)
 
         print("Waiting for robot to be enabled")
                 
         while not robotEnabled:
             time.sleep(1)
-            robotEnabled = robotTable.getBoolean('enabled', False)
+            robotEnabled = ctrlTable.getBoolean(self.robotEnabledCtrl["entry"], False)
 
         print("Robot is enabled")
 
@@ -115,12 +146,14 @@ class RobotDataCollector(object):
         # Check that there are tables to collect data from
         if not self.TABLES in self.config:
             print("No tables provided to collect data from.")
-            exit(0)
+            return
+
         tables = self.config[self.TABLES]
         samples = {}
 
         # Collect field names from input file
         field_names = self.collectFieldNames()
+        self.field_names = field_names
         # Open output file
         output_filepath = os.path.join(self.args.output_directory, self.args.output_file)
         out_file = open(output_filepath, 'w')
@@ -160,17 +193,96 @@ class RobotDataCollector(object):
                         sample_value = None
                     samples[sample_short_name].append(sample_value)
                     csv_line[sample_short_name] = sample_value
-                    print("Collected sample {}={} from table {}".format(sample_name, sample_value, table_name))
+                    if self.args.verbose:
+                        print("Collected sample {}={} from table {}".format(sample_name, sample_value, table_name))
             # Log an entry for the collected information in the csv file
             csv_writer.writerow(csv_line)
 
             #Increment sample count
             number_of_samples += 1
+        self.samples = samples
+
+    def generateGraphs(self):
         # If there are graphs requested from the input file
-        #   For each graph
-        #       Generate a graph with matplotlib
-        #       Save an image of the graph
-        pass
+        if not self.GRAPHS in self.config:
+            print("No graphs to generate.")
+            return
+
+        if self.args.verbose:
+            print("Generating graphs")
+
+        graphs = self.config[self.GRAPHS]
+        # For each graph
+        for graph in graphs:
+            # check that all lables exist for this graph
+            if not self.doGraphLablesExist(graph):
+                continue # skip this graph
+            if self.args.verbose:
+                print("Generating graph: {}".format(graph[self.GRAPH_TITLE]))
+            # Graph x and y field names from the graph
+            x_field_name = graph[self.GRAPH_DATAX].split('/')[-1]
+            y_field_names = [ y.split('/')[-1] for y in graph[self.GRAPH_DATAY]]
+            # Make sure X and Y sample values are present and valid
+            if not self.doGraphFieldNamesExist(graph, x_field_name, y_field_names):
+                continue # skip this graph
+            # Generate a graph with matplotlib
+            # Gather all of the lines for sorting
+            graph_data = list(zip(self.samples[x_field_name], *[self.samples[y_name] for y_name in y_field_names]))
+            graph_data.sort()
+            # Pull the sorted data back out again
+            x = [v[0] for v in graph_data]
+            if self.args.verbose:
+                print("X data: {}".format(x))
+            yvals = []
+            for i in range(len(y_field_names)):
+                yvals.append([v[i+1] for v in graph_data])
+            if self.args.verbose:
+                print("Y data: {}".format(yvals))
+            fig, ax = plt.subplots()
+            lines = []
+            # Graph each line on the plot
+            for t in zip(y_field_names, yvals):
+                data_label = t[0]
+                y = t[1]
+                if self.args.verbose:
+                    print("Graphing yvalue {}".format(t))
+                line, = ax.plot(x,y,label=data_label)
+                lines.append(line)
+            # Set graph properties
+            ax.legend()
+            ax.set_xlabel(graph[self.GRAPH_XLABEL])
+            ax.set_ylabel(graph[self.GRAPH_YLABEL])
+            ax.set_title(graph[self.GRAPH_TITLE])
+            # Save an image of the graph
+            img_file_name = self.args.output_file[0:-4] + "_" + graph[self.GRAPH_TITLE].replace(" ","_").lower() + ".png"
+            img_file_path = os.path.join(self.args.output_directory, img_file_name)
+            fig.savefig(img_file_path)
+
+    def doGraphFieldNamesExist(self, graph, x_field_name, y_field_names):
+        graph_title = graph[self.GRAPH_TITLE]
+        if x_field_name not in self.samples:
+            print("Field name {} for graph {} was not found in the samples collected. Skipping Graph.".format(x_field_name, graph_title))
+            return False
+        if len(y_field_names) == 0:
+            print("There were no {} entries provided for graph {}. Skipping Graph.".format(self.GRAPH_DATAY, graph_title))
+            return False
+        for y_name in y_field_names:
+            if y_name not in self.samples:
+                print("Field name {} for graph {} was not found in the samples collected. Skipping Graph.".format(y_name, graph_title))
+                return False
+        return True
+
+    def doGraphLablesExist(self, graph):
+        graph_title = "no title"
+        if self.GRAPH_TITLE in graph:
+            graph_title = graph[self.GRAPH_TITLE]
+        for label in self.GRAPH_REQUIRED_LABELS:
+            if not label in graph:
+                print("Label '{}' expected in graph '{}' but not found. Skipping graph.".format(label, graph_title))
+                return False
+        return True
 
 data_collector = RobotDataCollector(args)
+data_collector.waitForRobotEnabled()
 data_collector.collectData()
+data_collector.generateGraphs()
