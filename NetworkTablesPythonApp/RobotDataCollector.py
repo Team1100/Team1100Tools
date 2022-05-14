@@ -9,11 +9,16 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 date_str = datetime.now().strftime('%Y%m%d%H%M%S')
+COMMAND_MODE = "COMMAND_MODE"
+COUNT_MODE = "COUNT_MODE"
+TIME_MODE = "TIME_MODE"
 
 parser = argparse.ArgumentParser(description = 'Script to log data from robot. ')
 parser.add_argument('-d', '--output-directory', action='store', default='./', help='Name of directory to store the output file')
 parser.add_argument('-o', '--output-file', action='store', default=date_str + '_robot_data.csv', help='Name of file to use for writing collected data')
 parser.add_argument('-i', '--input-file', action='store', default='robot_nt_names.json', help='List of names to query from NetworkTables and store in the output file')
+parser.add_argument('-m', '--sample-mode', action='store', choices=[COMMAND_MODE, COUNT_MODE, TIME_MODE], default=COUNT_MODE,
+        help='Defines the samples collection mode. {} is indicates that a command will be executed and samples collected for the duration of the command. {} indicates that a specified sample count of samples will be collected. {} indicates that samples will be collected for a period of time.'.format(COMMAND_MODE, COUNT_MODE, TIME_MODE))
 parser.add_argument('-c', '--sample-count', action='store', type=int, default=1, help='Defines the number of samples collect before exiting')
 parser.add_argument('-t', '--robot-team', action='store', default=1100, type=int, help='Robot team number')
 parser.add_argument('-a', '--robot-ip', action='store', default=None, help='IP Address of the robot to connect to, e.x: 10.11.21.2 or 127.0.0.1')
@@ -24,9 +29,12 @@ print(args)
 
 class RobotDataCollector(object):
     # TOP LEVEL INPUT FILE KEYWORDS
-    TRIGGER_CMD = "triggerCommand"
+    CONTROLS = "controls"
     TABLES = "tables"
     GRAPHS = "graphs"
+    # CONTROLS property keywords
+    CONTROL_ROBOT_ENABLED = "robotEnabled"
+    CONTROL_TRIGGER_CMD = "triggerCommand"
     # TABLE propery keywords
     TABLE_ELEMENT_NAME = "name"
     TABLE_ELEMENT_TYPE = "type"
@@ -88,16 +96,16 @@ class RobotDataCollector(object):
         if not "controls" in self.config:
             raise Exception("Controls section missing from input file.")
         controls = self.config["controls"]
-        if not "robotEnabled" in controls:
+        if not self.CONTROL_ROBOT_ENABLED in controls:
             raise Exception("No network table entry identified for determining robot enable/disable state.")
-        self.robotEnabledCtrl = controls["robotEnabled"]
+        self.robotEnabledCtrl = controls[self.CONTROL_ROBOT_ENABLED]
         if not type(self.robotEnabledCtrl) is dict:
-            raise Exception("The robotEnabled entry MUST be a dictionary type in the json input file!")
+            raise Exception("The " + self.CONTROL_ROBOT_ENABLED + " entry MUST be a dictionary type in the json input file!")
         if not self.robotEnabledCtrl:
-            raise Exception("Multiple robotEnabled entries provided in json input file. Only one is supported!")
-        if not "triggerCommand" in controls:
+            raise Exception("Multiple " + self.CONTROL_ROBOT_ENABLED + " entries provided in json input file. Only one is supported!")
+        if not self.CONTROL_TRIGGER_CMD in controls:
             raise Exception("No trigger command supplied.")
-        self.triggerCommandCtrl = controls["triggerCommand"]
+        self.triggerCommandCtrl = controls[self.CONTROL_TRIGGER_CMD]
         if not type(self.triggerCommandCtrl) is dict:
             raise Exception("The triggerCommand entry MUST be a dictionary type in the json input file!")
         # Verify that all control objects have a table name
@@ -122,6 +130,38 @@ class RobotDataCollector(object):
             robotEnabled = ctrlTable.getBoolean(self.robotEnabledCtrl["entry"], False)
 
         print("Robot is enabled")
+
+    def startCommand(self):
+        # Get trigger command from configuration file
+        trigger_cmd = self.config["controls"][self.CONTROL_TRIGGER_CMD]
+        # Get the table associated with the trigger cmd
+        trigger_table = self.config["controls"]["table"]
+        table = NetworkTables.getTable(trigger_table)
+        # Query the running state of the trigger command.
+        # Note that the trigger cmd should look something like this:
+        # "DriveCompensatedDistance/DriveCompensatedDistance/running"
+        table.putBoolean(trigger_cmd, True)
+
+    def isCommandRunning(self):
+        # Get trigger command from configuration file
+        trigger_cmd = self.config["controls"][self.CONTROL_TRIGGER_CMD]
+        # Get the table associated with the trigger cmd
+        trigger_table = self.config["controls"]["table"]
+        table = NetworkTables.getTable(trigger_table)
+        # Query the running state of the trigger command.
+        # Note that the trigger cmd should look something like this:
+        # "DriveCompensatedDistance/DriveCompensatedDistance/running"
+        cmd_current_state = table.getBoolean(trigger_cmd, False)
+        return cmd_current_state
+
+    def commandInitializeInputs(self):
+        pass
+
+    def commandInputDone(self):
+        pass
+
+    def commandIncrementInputs(self):
+        pass
 
     def collectFieldNames(self):
         if not self.TABLES in self.config:
@@ -148,7 +188,6 @@ class RobotDataCollector(object):
             print("No tables provided to collect data from.")
             return
 
-        tables = self.config[self.TABLES]
         samples = {}
 
         # Collect field names from input file
@@ -161,46 +200,74 @@ class RobotDataCollector(object):
         if not self.args.no_labels: # Write labels by default
             csv_writer.writeheader()
 
-        # While there are still samples to collect
         number_of_samples = 0
-        while (number_of_samples < self.args.sample_count):
-            csv_line = {}
-            # For each table from the input file
-            for table_name in tables:
-                print("Collecting data from table " + table_name)
-                nt_table = NetworkTables.getTable(table_name)
-                # Collect each item from the table
-                for entry in tables[table_name]:
-                    # Extract sample name
-                    if not self.TABLE_ELEMENT_NAME in entry:
-                        continue
-                    sample_name = entry[self.TABLE_ELEMENT_NAME]
-                    # Extract sample type (default is double if not provided)
-                    sample_type = self.TABLE_ELEMENT_TYPE_DOUBLE
-                    if (self.TABLE_ELEMENT_TYPE in entry):
-                        sample_type = entry[self.TABLE_ELEMENT_TYPE]
-                    # Collect the sample
-                    sample_value = None
-                    sample_short_name = sample_name.split('/')[-1]
-                    if sample_short_name not in samples:
-                        samples[sample_short_name] = []
-                    if (sample_type == self.TABLE_ELEMENT_TYPE_DOUBLE):
-                        sample_value = nt_table.getNumber(sample_name, 0)
-                    elif (sample_type == self.TABLE_ELEMENT_TYPE_BOOLEAN):
-                        sample_value = nt_table.getBoolean(sample_name, False)
-                    else:
-                        print("Unknown sample type {} for sample {}. Using None.".format(sample_type, sample_name))
-                        sample_value = None
-                    samples[sample_short_name].append(sample_value)
-                    csv_line[sample_short_name] = sample_value
-                    if self.args.verbose:
-                        print("Collected sample {}={} from table {}".format(sample_name, sample_value, table_name))
-            # Log an entry for the collected information in the csv file
-            csv_writer.writerow(csv_line)
-
-            #Increment sample count
-            number_of_samples += 1
+        # Determine the requested mode and collect samples
+        if (self.args.sample_mode == COUNT_MODE):
+            # While there are still samples to collect
+            while (number_of_samples < self.args.sample_count):
+                # Collect a sample
+                self.collectSample(samples, csv_writer)
+                # Increment sample count
+                number_of_samples += 1
+        elif (self.args.sample_mode == COMMAND_MODE):
+            # Initialize inputs
+            self.commandInitializeInputs()
+            # While not all inputs have reached their target
+            while (not self.commandInputDone()):
+                # Start the command
+                self.startCommand()
+                # While the command is still running
+                while (self.isCommandRunning()):
+                    # Collect a sample
+                    self.collectSample(samples, csv_writer)
+                    # Increment sample count
+                    number_of_samples += 1
+                # Increment inputs
+                self.commandIncrementInputs()
+            # Open and write a new file?
+        elif (self.args.sample_mode == TIME_MODE):
+            # Start the clock
+            # While there is still time remaining
+                # Collect a sample
+                # Increment sample count
+            pass
         self.samples = samples
+
+    def collectSample(self, samples, csv_writer):
+        tables = self.config[self.TABLES]
+        csv_line = {}
+        # For each table from the input file
+        for table_name in tables:
+            print("Collecting data from table " + table_name)
+            nt_table = NetworkTables.getTable(table_name)
+            # Collect each item from the table
+            for entry in tables[table_name]:
+                # Extract sample name
+                if not self.TABLE_ELEMENT_NAME in entry:
+                    continue
+                sample_name = entry[self.TABLE_ELEMENT_NAME]
+                # Extract sample type (default is double if not provided)
+                sample_type = self.TABLE_ELEMENT_TYPE_DOUBLE
+                if (self.TABLE_ELEMENT_TYPE in entry):
+                    sample_type = entry[self.TABLE_ELEMENT_TYPE]
+                # Collect the sample
+                sample_value = None
+                sample_short_name = sample_name.split('/')[-1]
+                if sample_short_name not in samples:
+                    samples[sample_short_name] = []
+                if (sample_type == self.TABLE_ELEMENT_TYPE_DOUBLE):
+                    sample_value = nt_table.getNumber(sample_name, 0)
+                elif (sample_type == self.TABLE_ELEMENT_TYPE_BOOLEAN):
+                    sample_value = nt_table.getBoolean(sample_name, False)
+                else:
+                    print("Unknown sample type {} for sample {}. Using None.".format(sample_type, sample_name))
+                    sample_value = None
+                samples[sample_short_name].append(sample_value)
+                csv_line[sample_short_name] = sample_value
+                if self.args.verbose:
+                    print("Collected sample {}={} from table {}".format(sample_name, sample_value, table_name))
+        # Log an entry for the collected information in the csv file
+        csv_writer.writerow(csv_line)
 
     def generateGraphs(self):
         # If there are graphs requested from the input file

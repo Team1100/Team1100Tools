@@ -6,7 +6,25 @@
       },
       "triggerCommand":{
           "table": "Shuffleboard/Drive",
-          "entry": "DriveCompensatedDistance/DriveCompensatedDistance/running"
+          "entry": "DriveCompensatedDistance/DriveCompensatedDistance/running",
+          "inputs": {
+              "Shuffleboard/Drive" : [
+                  {
+                      "name": "DriveDistance/drivingDistance",
+                      "type": "double",
+                      "rangeStart": 24,
+                      "rangeEnd": 24,
+                      "increment": 0
+                  },
+                  {
+                      "name": "DriveDistance/drivingSpeed",
+                      "type": "double",
+                      "rangeStart": 0,
+                      "rangeEnd": 1,
+                      "increment": 0.1
+                  }
+              ]
+          }
       }
   },
   "tables": {
