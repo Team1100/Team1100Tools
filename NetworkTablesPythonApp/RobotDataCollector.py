@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 
 date_str = datetime.now().strftime('%Y%m%d%H%M%S')
 COMMAND_MODE = "COMMAND_MODE"
+COMMAND_INPUT_MODE = "COMMAND_INPUT_MODE"
 COUNT_MODE = "COUNT_MODE"
 TIME_MODE = "TIME_MODE"
 
@@ -17,8 +18,8 @@ parser = argparse.ArgumentParser(description = 'Script to log data from robot. '
 parser.add_argument('-d', '--output-directory', action='store', default='./', help='Name of directory to store the output file')
 parser.add_argument('-o', '--output-file', action='store', default=date_str + '_robot_data.csv', help='Name of file to use for writing collected data')
 parser.add_argument('-i', '--input-file', action='store', default='robot_nt_names.json', help='List of names to query from NetworkTables and store in the output file')
-parser.add_argument('-m', '--sample-mode', action='store', choices=[COMMAND_MODE, COUNT_MODE, TIME_MODE], default=COUNT_MODE,
-        help='Defines the samples collection mode. {} is indicates that a command will be executed and samples collected for the duration of the command. {} indicates that a specified sample count of samples will be collected. {} indicates that samples will be collected for a period of time.'.format(COMMAND_MODE, COUNT_MODE, TIME_MODE))
+parser.add_argument('-m', '--sample-mode', action='store', choices=[COMMAND_MODE, COMMAND_INPUT_MODE, COUNT_MODE, TIME_MODE], default=COUNT_MODE,
+        help='Defines the samples collection mode. {} indicates that a command will be executed and samples collected for the duration of the command. {} indicates that a command will be executed for all provided inputs and data will be collected each time that the command is executed. {} indicates that a specified sample count of samples will be collected. {} indicates that samples will be collected for a period of time.'.format(COMMAND_MODE, COMMAND_INPUT_MODE, COUNT_MODE, TIME_MODE))
 parser.add_argument('-c', '--sample-count', action='store', type=int, default=1, help='Defines the number of samples collect before exiting')
 parser.add_argument('-t', '--robot-team', action='store', default=1100, type=int, help='Robot team number')
 parser.add_argument('-a', '--robot-ip', action='store', default=None, help='IP Address of the robot to connect to, e.x: 10.11.21.2 or 127.0.0.1')
@@ -93,9 +94,9 @@ class RobotDataCollector(object):
         print("Connected!")
 
     def verifyConfigControls(self):
-        if not "controls" in self.config:
+        if not self.CONTROLS in self.config:
             raise Exception("Controls section missing from input file.")
-        controls = self.config["controls"]
+        controls = self.config[self.CONTROLS]
         if not self.CONTROL_ROBOT_ENABLED in controls:
             raise Exception("No network table entry identified for determining robot enable/disable state.")
         self.robotEnabledCtrl = controls[self.CONTROL_ROBOT_ENABLED]
@@ -111,12 +112,26 @@ class RobotDataCollector(object):
         # Verify that all control objects have a table name
         # and network tables table entry
         required_control_labels = ["table", "entry"]
-        for control_name in self.config["controls"]:
-            control_obj = self.config["controls"][control_name]
+        for control_name in self.config[self.CONTROLS]:
+            control_obj = self.config[self.CONTROLS][control_name]
             for label in required_control_labels:
                 if label not in control_obj:
                     raise Exception("The {} entry must have a dictionary entry for {} but none was found!".format(control_name, label))
-
+        self.commandInputs = None
+        # If mode is COMMAND_INPUT_MODE, then check to make sure an input section exists for the command
+        if self.args.sample_mode == COMMAND_INPUT_DONE:
+            if not "input" in self.config[self.CONTROLS][self.CONTROL_TRIGGER_CMD]:
+                raise Exception("The mode {} was used, but the {} entry does not have an 'inputs' key!".format(self.args.sample_mode, self.CONTROL_TRIGGER_CMD))
+            self.commandInputs = self.config[self.CONTROLS][self.CONTROL_TRIGGER_CMD]["inputs"]
+            if not type(self.commandInputs) is dict:
+                raise Exception("The command inputs entry MUST be a dictionary type in the json input file!")
+            # Check that every input entry has the required labels
+            required_input_lables = ["name", "type", "rangeStart", "rangeEnd", "increment"]
+            for input_table in self.commandInputs:
+                for input_entry in input_table:
+                    for label in required_input_lables:
+                        if not label in input_entry:
+                            raise Exception("The entry {} from table {} must have a dictionary entry for {} but none was found!".format(input_entry, input_table, label))
 
 
     def waitForRobotEnabled(self):
@@ -155,13 +170,50 @@ class RobotDataCollector(object):
         return cmd_current_state
 
     def commandInitializeInputs(self):
-        pass
+        for input_table in self.commandInputs:
+            table = NetworkTables.getTable(input_table)
+            for input_entry in input_table:
+                start_value = input_entry.rangeStart
+                table.putNumber(input_entry.name, start_value)
 
     def commandInputDone(self):
-        pass
+        all_inputs_reached_completion = True
+        for input_table in self.commandInputs:
+            table = NetworkTables.getTable(input_table)
+            for input_entry in input_table:
+                start_value = input_entry.rangeStart
+                end_value = input_entry.rangeEnd
+                current_value = table.getNumber(input_entry.name, start_value)
+                if current_value != end_value:
+                    all_inputs_reached_completion = False
+        return all_inputs_reached_completion
+
 
     def commandIncrementInputs(self):
-        pass
+        for input_table in self.commandInputs:
+            table = NetworkTables.getTable(input_table)
+            for input_entry in input_table:
+                start_value = input_entry.rangeStart
+                end_value = input_entry.rangeEnd
+                increment = input_entry.increment
+                current_value = table.getNumber(input_entry.name, start_value)
+                current_value = current_value + increment
+                # TODO: Correct for over shooting the end value
+                # TODO: Verify that the start, end, and increment values make sense. :)
+
+
+    def insertInputsIntoTableData(self):
+        if self.commandInputs is None:
+            return
+
+        for input_table in self.commandInputs:
+            for input_entry in input_table:
+                name = input_entry.name
+                input_type = input_entry.type
+                if not input_table in self.config[self.TABLES]:
+                    self.config[self.TABLES][input_table] = []
+                input_data = {"name": name, "type": input_type}
+                self.config[self.TABLES][input_table].append(input_data)
 
     def collectFieldNames(self):
         if not self.TABLES in self.config:
@@ -190,6 +242,9 @@ class RobotDataCollector(object):
 
         samples = {}
 
+        # Insert inputs to the beggining of the tables section if present
+        self.insertInputsIntoTableData()
+
         # Collect field names from input file
         field_names = self.collectFieldNames()
         self.field_names = field_names
@@ -210,6 +265,15 @@ class RobotDataCollector(object):
                 # Increment sample count
                 number_of_samples += 1
         elif (self.args.sample_mode == COMMAND_MODE):
+            # Start the command
+            self.startCommand()
+            # While the command is still running
+            while (self.isCommandRunning()):
+                # Collect a sample
+                self.collectSample(samples, csv_writer)
+                # Increment sample count
+                number_of_samples += 1
+        elif (self.args.sample_mode == COMMAND_INPUT_MODE):
             # Initialize inputs
             self.commandInitializeInputs()
             # While not all inputs have reached their target
@@ -225,6 +289,8 @@ class RobotDataCollector(object):
                 # Increment inputs
                 self.commandIncrementInputs()
             # Open and write a new file?
+            # TODO: Either write different inputs into different files OR
+            # log the inputs with the samples
         elif (self.args.sample_mode == TIME_MODE):
             # Start the clock
             # While there is still time remaining
